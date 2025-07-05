@@ -80,6 +80,7 @@ The application is designed for cloud deployment on platforms like:
 ## Changelog
 
 - July 05, 2025. Initial setup
+- July 05, 2025. Added PostgreSQL database integration with financial data storage, historical analysis, market alerts, and database statistics pages
 
 ## User Preferences
 
