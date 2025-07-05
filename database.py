@@ -54,6 +54,64 @@ class MarketAlerts(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class Portfolio(Base):
+    """Store portfolio information"""
+    __tablename__ = "portfolios"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(String(100), nullable=False)
+    name = Column(String(100), nullable=False)
+    description = Column(Text)
+    cash_balance = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class PortfolioHolding(Base):
+    """Store individual holdings in portfolios"""
+    __tablename__ = "portfolio_holdings"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    portfolio_id = Column(UUID(as_uuid=True), nullable=False)
+    symbol = Column(String(20), nullable=False)
+    quantity = Column(Float, nullable=False)
+    average_cost = Column(Float, nullable=False)
+    purchase_date = Column(DateTime, default=datetime.utcnow)
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class Transaction(Base):
+    """Store transaction history"""
+    __tablename__ = "transactions"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    portfolio_id = Column(UUID(as_uuid=True), nullable=False)
+    symbol = Column(String(20), nullable=False)
+    transaction_type = Column(String(10), nullable=False)  # 'buy', 'sell'
+    quantity = Column(Float, nullable=False)
+    price = Column(Float, nullable=False)
+    total_amount = Column(Float, nullable=False)
+    fees = Column(Float, default=0.0)
+    transaction_date = Column(DateTime, default=datetime.utcnow)
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class NewsArticle(Base):
+    """Store news articles for caching and tracking"""
+    __tablename__ = "news_articles"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title = Column(Text, nullable=False)
+    summary = Column(Text)
+    url = Column(Text, nullable=False)
+    source = Column(String(100), nullable=False)
+    author = Column(String(200))
+    published_date = Column(DateTime, nullable=False)
+    symbols_mentioned = Column(Text)  # JSON string of symbols
+    sector = Column(String(50))
+    sentiment = Column(String(20))  # 'positive', 'negative', 'neutral'
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class DatabaseManager:
     """Manage database operations for the finance dashboard"""
     
@@ -330,6 +388,345 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting market statistics: {str(e)}")
             return {}
+    
+    # Portfolio Management Methods
+    def create_portfolio(self, user_id: str, name: str, description: str = "", cash_balance: float = 0.0) -> Optional[str]:
+        """Create a new portfolio"""
+        session = None
+        try:
+            session = self.get_session()
+            
+            portfolio = Portfolio(
+                user_id=user_id,
+                name=name,
+                description=description,
+                cash_balance=cash_balance
+            )
+            
+            session.add(portfolio)
+            session.commit()
+            
+            portfolio_id = str(portfolio.id)
+            session.close()
+            return portfolio_id
+            
+        except Exception as e:
+            logger.error(f"Error creating portfolio: {str(e)}")
+            if session:
+                session.rollback()
+                session.close()
+            return None
+    
+    def get_user_portfolios(self, user_id: str) -> List[Dict]:
+        """Get all portfolios for a user"""
+        try:
+            session = self.get_session()
+            
+            portfolios = session.query(Portfolio).filter(
+                Portfolio.user_id == user_id
+            ).order_by(Portfolio.created_at.desc()).all()
+            
+            session.close()
+            
+            return [{
+                'id': str(portfolio.id),
+                'name': portfolio.name,
+                'description': portfolio.description,
+                'cash_balance': portfolio.cash_balance,
+                'created_at': portfolio.created_at,
+                'updated_at': portfolio.updated_at
+            } for portfolio in portfolios]
+            
+        except Exception as e:
+            logger.error(f"Error getting user portfolios: {str(e)}")
+            return []
+    
+    def add_holding(self, portfolio_id: str, symbol: str, quantity: float, price: float, notes: str = "") -> bool:
+        """Add or update a holding in a portfolio"""
+        session = None
+        try:
+            session = self.get_session()
+            
+            # Check if holding already exists
+            existing_holding = session.query(PortfolioHolding).filter(
+                PortfolioHolding.portfolio_id == uuid.UUID(portfolio_id),
+                PortfolioHolding.symbol == symbol
+            ).first()
+            
+            if existing_holding:
+                # Update existing holding (average cost calculation)
+                total_quantity = existing_holding.quantity + quantity
+                total_cost = (existing_holding.quantity * existing_holding.average_cost) + (quantity * price)
+                new_average_cost = total_cost / total_quantity if total_quantity > 0 else price
+                
+                existing_holding.quantity = total_quantity
+                existing_holding.average_cost = new_average_cost
+                existing_holding.updated_at = datetime.utcnow()
+                if notes:
+                    existing_holding.notes = notes
+            else:
+                # Create new holding
+                holding = PortfolioHolding(
+                    portfolio_id=uuid.UUID(portfolio_id),
+                    symbol=symbol,
+                    quantity=quantity,
+                    average_cost=price,
+                    notes=notes
+                )
+                session.add(holding)
+            
+            # Add transaction record
+            transaction = Transaction(
+                portfolio_id=uuid.UUID(portfolio_id),
+                symbol=symbol,
+                transaction_type='buy',
+                quantity=quantity,
+                price=price,
+                total_amount=quantity * price,
+                notes=notes
+            )
+            session.add(transaction)
+            
+            session.commit()
+            session.close()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error adding holding: {str(e)}")
+            if session:
+                session.rollback()
+                session.close()
+            return False
+    
+    def sell_holding(self, portfolio_id: str, symbol: str, quantity: float, price: float, notes: str = "") -> bool:
+        """Sell shares from a holding"""
+        session = None
+        try:
+            session = self.get_session()
+            
+            # Get existing holding
+            holding = session.query(PortfolioHolding).filter(
+                PortfolioHolding.portfolio_id == uuid.UUID(portfolio_id),
+                PortfolioHolding.symbol == symbol
+            ).first()
+            
+            if not holding:
+                logger.error(f"No holding found for {symbol} in portfolio {portfolio_id}")
+                session.close()
+                return False
+            
+            if holding.quantity < quantity:
+                logger.error(f"Insufficient shares: trying to sell {quantity}, only have {holding.quantity}")
+                session.close()
+                return False
+            
+            # Update holding
+            holding.quantity -= quantity
+            holding.updated_at = datetime.utcnow()
+            
+            # If quantity becomes 0, remove the holding
+            if holding.quantity <= 0:
+                session.delete(holding)
+            
+            # Add transaction record
+            transaction = Transaction(
+                portfolio_id=uuid.UUID(portfolio_id),
+                symbol=symbol,
+                transaction_type='sell',
+                quantity=quantity,
+                price=price,
+                total_amount=quantity * price,
+                notes=notes
+            )
+            session.add(transaction)
+            
+            session.commit()
+            session.close()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error selling holding: {str(e)}")
+            if session:
+                session.rollback()
+                session.close()
+            return False
+    
+    def get_portfolio_holdings(self, portfolio_id: str) -> List[Dict]:
+        """Get all holdings for a portfolio"""
+        try:
+            session = self.get_session()
+            
+            holdings = session.query(PortfolioHolding).filter(
+                PortfolioHolding.portfolio_id == uuid.UUID(portfolio_id)
+            ).all()
+            
+            session.close()
+            
+            return [{
+                'id': str(holding.id),
+                'symbol': holding.symbol,
+                'quantity': holding.quantity,
+                'average_cost': holding.average_cost,
+                'purchase_date': holding.purchase_date,
+                'notes': holding.notes
+            } for holding in holdings]
+            
+        except Exception as e:
+            logger.error(f"Error getting portfolio holdings: {str(e)}")
+            return []
+    
+    def get_portfolio_transactions(self, portfolio_id: str, limit: int = 50) -> List[Dict]:
+        """Get transaction history for a portfolio"""
+        try:
+            session = self.get_session()
+            
+            transactions = session.query(Transaction).filter(
+                Transaction.portfolio_id == uuid.UUID(portfolio_id)
+            ).order_by(Transaction.transaction_date.desc()).limit(limit).all()
+            
+            session.close()
+            
+            return [{
+                'id': str(transaction.id),
+                'symbol': transaction.symbol,
+                'type': transaction.transaction_type,
+                'quantity': transaction.quantity,
+                'price': transaction.price,
+                'total_amount': transaction.total_amount,
+                'fees': transaction.fees,
+                'date': transaction.transaction_date,
+                'notes': transaction.notes
+            } for transaction in transactions]
+            
+        except Exception as e:
+            logger.error(f"Error getting portfolio transactions: {str(e)}")
+            return []
+    
+    def calculate_portfolio_value(self, portfolio_id: str, current_prices: Dict[str, float]) -> Dict:
+        """Calculate portfolio current value and performance"""
+        try:
+            holdings = self.get_portfolio_holdings(portfolio_id)
+            
+            total_value = 0.0
+            total_cost = 0.0
+            holdings_details = []
+            
+            for holding in holdings:
+                symbol = holding['symbol']
+                quantity = holding['quantity']
+                avg_cost = holding['average_cost']
+                
+                current_price = current_prices.get(symbol, avg_cost)
+                market_value = quantity * current_price
+                cost_basis = quantity * avg_cost
+                gain_loss = market_value - cost_basis
+                gain_loss_pct = (gain_loss / cost_basis) * 100 if cost_basis > 0 else 0
+                
+                holdings_details.append({
+                    'symbol': symbol,
+                    'quantity': quantity,
+                    'avg_cost': avg_cost,
+                    'current_price': current_price,
+                    'market_value': market_value,
+                    'cost_basis': cost_basis,
+                    'gain_loss': gain_loss,
+                    'gain_loss_pct': gain_loss_pct
+                })
+                
+                total_value += market_value
+                total_cost += cost_basis
+            
+            total_gain_loss = total_value - total_cost
+            total_gain_loss_pct = (total_gain_loss / total_cost) * 100 if total_cost > 0 else 0
+            
+            return {
+                'total_value': total_value,
+                'total_cost': total_cost,
+                'total_gain_loss': total_gain_loss,
+                'total_gain_loss_pct': total_gain_loss_pct,
+                'holdings': holdings_details
+            }
+            
+        except Exception as e:
+            logger.error(f"Error calculating portfolio value: {str(e)}")
+            return {
+                'total_value': 0.0,
+                'total_cost': 0.0,
+                'total_gain_loss': 0.0,
+                'total_gain_loss_pct': 0.0,
+                'holdings': []
+            }
+    
+    # News Management Methods
+    def store_news_article(self, article: Dict) -> bool:
+        """Store a news article in the database"""
+        session = None
+        try:
+            session = self.get_session()
+            
+            # Check if article already exists (by URL)
+            existing = session.query(NewsArticle).filter(
+                NewsArticle.url == article['link']
+            ).first()
+            
+            if existing:
+                session.close()
+                return True  # Already stored
+            
+            news_article = NewsArticle(
+                title=article['title'],
+                summary=article.get('summary', ''),
+                url=article['link'],
+                source=article['source'],
+                author=article.get('author', ''),
+                published_date=article['published'],
+                symbols_mentioned=article.get('symbols_mentioned', ''),
+                sector=article.get('sector', ''),
+                sentiment=article.get('sentiment', 'neutral')
+            )
+            
+            session.add(news_article)
+            session.commit()
+            session.close()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error storing news article: {str(e)}")
+            if session:
+                session.rollback()
+                session.close()
+            return False
+    
+    def get_stored_news(self, limit: int = 20, symbol: str = None) -> List[Dict]:
+        """Get stored news articles"""
+        try:
+            session = self.get_session()
+            
+            query = session.query(NewsArticle)
+            
+            if symbol:
+                query = query.filter(NewsArticle.symbols_mentioned.contains(symbol))
+            
+            articles = query.order_by(NewsArticle.published_date.desc()).limit(limit).all()
+            
+            session.close()
+            
+            return [{
+                'id': str(article.id),
+                'title': article.title,
+                'summary': article.summary,
+                'url': article.url,
+                'source': article.source,
+                'author': article.author,
+                'published_date': article.published_date,
+                'symbols_mentioned': article.symbols_mentioned,
+                'sector': article.sector,
+                'sentiment': article.sentiment
+            } for article in articles]
+            
+        except Exception as e:
+            logger.error(f"Error getting stored news: {str(e)}")
+            return []
 
 # Initialize database manager
 db_manager = DatabaseManager()

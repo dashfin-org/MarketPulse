@@ -27,7 +27,8 @@ The application follows a modular architecture built on Streamlit for the web fr
 
 **Data Sources**: 
 - Yahoo Finance API via yfinance library for real-time and historical market data
-- Database storage for accumulated historical data and alerts
+- RSS feeds from major financial news sources (Yahoo Finance, Reuters, MarketWatch, CNBC, Bloomberg)
+- Database storage for accumulated historical data, alerts, news articles, and portfolio data
 
 ## Key Components
 
@@ -88,6 +89,7 @@ The application is designed for cloud deployment on platforms like:
 
 - July 05, 2025. Initial setup
 - July 05, 2025. Added PostgreSQL database integration with financial data storage, historical analysis, market alerts, and database statistics pages
+- July 05, 2025. Added news and portfolio tracking functionality with RSS feeds from major financial sources and comprehensive portfolio management system
 
 ## User Preferences
 
