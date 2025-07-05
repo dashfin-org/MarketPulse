@@ -57,7 +57,7 @@ indices_col1, indices_col2 = st.columns(2)
 with indices_col1:
     st.subheader("Major US Indices")
     us_indices = data_fetcher.get_indices_data(['SPY', 'QQQ', 'DIA'])
-    if not us_indices.empty:
+    if us_indices:
         for symbol, data in us_indices.items():
             price = data['price']
             change = data['change']
@@ -86,7 +86,7 @@ with indices_col1:
 with indices_col2:
     st.subheader("International Indices")
     intl_indices = data_fetcher.get_indices_data(['EWU', 'EWG', 'EWJ'])
-    if not intl_indices.empty:
+    if intl_indices:
         for symbol, data in intl_indices.items():
             price = data['price']
             change = data['change']
@@ -121,7 +121,7 @@ commodities_col1, commodities_col2 = st.columns(2)
 with commodities_col1:
     st.subheader("Precious Metals")
     metals = data_fetcher.get_commodities_data(['GLD', 'SLV'])
-    if not metals.empty:
+    if metals:
         for symbol, data in metals.items():
             price = data['price']
             change = data['change']
@@ -149,7 +149,7 @@ with commodities_col1:
 with commodities_col2:
     st.subheader("Energy")
     energy = data_fetcher.get_commodities_data(['USO', 'UNG'])
-    if not energy.empty:
+    if energy:
         for symbol, data in energy.items():
             price = data['price']
             change = data['change']
@@ -222,8 +222,8 @@ with bonds_col3:
     st.subheader("Japanese 10Y")
     jp_10y = data_fetcher.get_bond_data('^TNX')  # Using TNX as proxy - in real implementation would use Japanese bond
     if jp_10y:
-        yield_val = max(0.1, de_10y['price'] - 3.5)  # Approximate Japanese yield
-        change = de_10y['change'] * 0.3
+        yield_val = max(0.1, jp_10y['price'] - 3.5)  # Approximate Japanese yield
+        change = jp_10y['change'] * 0.3
         color = "🟢" if change >= 0 else "🔴"
         color_style = "color: green;" if change >= 0 else "color: red;"
         
@@ -291,7 +291,7 @@ sector_col1, sector_col2 = st.columns(2)
 with sector_col1:
     st.subheader("Technology & Healthcare")
     tech_health = data_fetcher.get_sector_etfs(['XLK', 'XLV'])
-    if not tech_health.empty:
+    if tech_health:
         for symbol, data in tech_health.items():
             price = data['price']
             change = data['change']
@@ -319,7 +319,7 @@ with sector_col1:
 with sector_col2:
     st.subheader("Energy & Finance")
     energy_finance = data_fetcher.get_sector_etfs(['XLE', 'XLF'])
-    if not energy_finance.empty:
+    if energy_finance:
         for symbol, data in energy_finance.items():
             price = data['price']
             change = data['change']
@@ -347,7 +347,7 @@ with sector_col2:
 # Sector Performance Chart
 st.subheader("📊 Sector Performance Comparison")
 all_sectors = data_fetcher.get_sector_etfs(['XLK', 'XLV', 'XLE', 'XLF'])
-if not all_sectors.empty:
+if all_sectors:
     sector_chart = create_performance_chart(all_sectors)
     if sector_chart:
         st.plotly_chart(sector_chart, use_container_width=True)
