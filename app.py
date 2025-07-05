@@ -7,7 +7,8 @@ import plotly.express as px
 from datetime import datetime, timedelta
 import time
 from utils.data_fetcher import DataFetcher
-from utils.charts import create_price_chart, create_performance_chart
+from utils.charts import create_price_chart, create_performance_chart, create_enhanced_price_chart, create_chart_from_db_data
+from utils.intervals import FinanceIntervals
 from database import db_manager
 import json
 
@@ -302,7 +303,7 @@ if page == "Live Dashboard":
     with vix_col2:
         # VIX Chart
         if vix_data:
-            vix_chart = create_price_chart('^VIX', "VIX Volatility Index - 30 Day History")
+            vix_chart = create_enhanced_price_chart('^VIX', '30d', use_yfinance=True)
             if vix_chart:
                 st.plotly_chart(vix_chart, use_container_width=True)
 
@@ -389,66 +390,117 @@ if page == "Live Dashboard":
 elif page == "Historical Data":
     st.header("📈 Historical Data Analysis")
     
-    # Symbol selection
-    col1, col2 = st.columns([2, 1])
+    # Symbol and interval selection
+    col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
         selected_symbol = st.selectbox(
             "Select Symbol", 
             ['SPY', 'QQQ', 'DIA', 'GLD', 'SLV', 'USO', 'UNG', '^VIX', 'XLK', 'XLV', 'XLE', 'XLF']
         )
     with col2:
-        hours_back = st.slider("Hours of History", 1, 168, 24)
+        # Get available intervals
+        intervals = FinanceIntervals.get_available_intervals()
+        selected_interval = st.selectbox(
+            "Time Interval",
+            options=list(intervals.keys()),
+            format_func=lambda x: intervals[x],
+            index=list(intervals.keys()).index('1d')  # Default to 1 day
+        )
+    with col3:
+        data_source = st.selectbox(
+            "Data Source",
+            ["Yahoo Finance", "Database (if available)"]
+        )
     
-    if selected_symbol and db_initialized:
-        # Get historical data from database
-        historical_data = db_manager.get_historical_data(selected_symbol, hours_back)
+    if selected_symbol and selected_interval:
+        # Display interval information
+        interval_config = FinanceIntervals.get_interval_config(selected_interval)
+        if interval_config:
+            st.info(f"📊 Showing {intervals[selected_interval]} data for {selected_symbol}")
         
-        if historical_data:
-            # Convert to DataFrame for easy plotting
-            df = pd.DataFrame(historical_data)
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
-            df = df.sort_values('timestamp')
+        # Try to get data based on selected source
+        chart_created = False
+        
+        if data_source == "Database (if available)" and db_initialized:
+            # Try database first
+            lookback_hours = FinanceIntervals.get_db_lookback_hours(selected_interval)
+            historical_data = db_manager.get_historical_data(selected_symbol, lookback_hours)
             
-            # Create historical price chart
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=df['timestamp'],
-                y=df['price'],
-                mode='lines+markers',
-                name=f'{selected_symbol} Price',
-                line=dict(color='blue', width=2)
-            ))
-            
-            fig.update_layout(
-                title=f"{selected_symbol} Price History (Last {hours_back} hours)",
-                xaxis_title="Time",
-                yaxis_title="Price",
-                template="plotly_white",
-                height=400
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Summary statistics
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Current Price", f"${df['price'].iloc[-1]:.2f}")
-            with col2:
-                price_change = df['price'].iloc[-1] - df['price'].iloc[0]
-                st.metric("Price Change", f"${price_change:.2f}")
-            with col3:
-                st.metric("Max Price", f"${df['price'].max():.2f}")
-            with col4:
-                st.metric("Min Price", f"${df['price'].min():.2f}")
-            
-            # Data table
-            st.subheader("Recent Data Points")
-            st.dataframe(df.tail(10), use_container_width=True)
-            
-        else:
-            st.info(f"No historical data available for {selected_symbol} in the last {hours_back} hours.")
+            if historical_data and len(historical_data) > 0:
+                # Convert to DataFrame for easy plotting
+                df = pd.DataFrame(historical_data)
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                df = df.sort_values('timestamp')
+                
+                # Create chart from database data
+                chart = create_chart_from_db_data(df, selected_symbol, intervals[selected_interval])
+                if chart:
+                    st.plotly_chart(chart, use_container_width=True)
+                    chart_created = True
+                    
+                    # Summary statistics
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Current Price", f"${df['price'].iloc[-1]:.2f}")
+                    with col2:
+                        price_change = df['price'].iloc[-1] - df['price'].iloc[0]
+                        st.metric("Price Change", f"${price_change:.2f}")
+                    with col3:
+                        st.metric("Max Price", f"${df['price'].max():.2f}")
+                    with col4:
+                        st.metric("Min Price", f"${df['price'].min():.2f}")
+                    
+                    # Show data source info
+                    st.caption(f"📊 Data from database: {len(df)} data points over {lookback_hours} hours")
+                    
+                    # Data table
+                    with st.expander("Recent Data Points"):
+                        st.dataframe(df.tail(20), use_container_width=True)
+        
+        # Fallback to Yahoo Finance if database didn't work or wasn't selected
+        if not chart_created:
+            try:
+                chart = create_enhanced_price_chart(selected_symbol, selected_interval, use_yfinance=True)
+                if chart:
+                    st.plotly_chart(chart, use_container_width=True)
+                    chart_created = True
+                    
+                    # Get current data for metrics
+                    current_data = data_fetcher._fetch_ticker_data(selected_symbol)
+                    if current_data:
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Current Price", f"${current_data['price']:.2f}")
+                        with col2:
+                            st.metric("Change", f"${current_data['change']:+.2f}")
+                        with col3:
+                            st.metric("Change %", f"{current_data['change_pct']:+.2f}%")
+                        with col4:
+                            st.metric("Volume", f"{current_data['volume']:,.0f}")
+                    
+                    # Show data source info
+                    st.caption("📊 Data from Yahoo Finance (real-time)")
+                else:
+                    st.warning(f"No data available for {selected_symbol} at {intervals[selected_interval]} interval")
+            except Exception as e:
+                st.error(f"Error fetching data: {str(e)}")
+        
+        if not chart_created:
+            if data_source == "Database (if available)":
+                st.info(f"No database data available for {selected_symbol}. Try switching to Yahoo Finance or check the Live Dashboard to populate database.")
+            else:
+                st.error("Unable to fetch data from any source.")
+        
+        # Additional interval information
+        with st.expander("ℹ️ Interval Information"):
+            if interval_config:
+                st.write(f"**Period**: {interval_config['period']}")
+                st.write(f"**Interval**: {interval_config['interval']}")
+                if interval_config['hours']:
+                    st.write(f"**Duration**: {interval_config['hours']} hours")
+                st.write(f"**Intraday**: {'Yes' if FinanceIntervals.is_intraday(selected_interval) else 'No'}")
     else:
-        st.warning("Database not available or symbol not selected.")
+        st.warning("Please select a symbol and interval.")
 
 elif page == "Market Alerts":
     st.header("🚨 Market Alerts")
@@ -558,6 +610,7 @@ elif page == "Database Stats":
     # Manual data cleanup
     st.subheader("Database Management")
     if st.button("Clean Old Data (>7 days)"):
+        session = None
         try:
             session = db_manager.get_session()
             from database import FinancialData
