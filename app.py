@@ -9,6 +9,7 @@ import time
 from utils.data_fetcher import DataFetcher
 from utils.charts import create_price_chart, create_performance_chart, create_enhanced_price_chart, create_chart_from_db_data
 from utils.intervals import FinanceIntervals
+from utils.news_fetcher import news_fetcher
 from database import db_manager
 import json
 
@@ -47,7 +48,7 @@ st.markdown("---")
 st.sidebar.header("Dashboard Controls")
 
 # Navigation
-page = st.sidebar.selectbox("Navigate", ["Live Dashboard", "Historical Data", "Market Alerts", "Database Stats"])
+page = st.sidebar.selectbox("Navigate", ["Live Dashboard", "Historical Data", "Market Alerts", "News", "Portfolio", "Database Stats"])
 
 # Auto-refresh controls (only for live dashboard)
 if page == "Live Dashboard":
@@ -566,6 +567,289 @@ elif page == "Market Alerts":
                     st.write(f"Alert: {alert['symbol']} {alert['alert_type']} ${alert['target_price']:.2f} - Current: ${alert['current_price']:.2f}")
             else:
                 st.info("No alerts triggered.")
+
+elif page == "News":
+    st.header("📰 Financial News")
+    
+    # News controls
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        news_type = st.selectbox(
+            "News Type",
+            ["Market News", "Symbol News", "Sector News", "Search"]
+        )
+    with col2:
+        if news_type == "Symbol News":
+            news_symbol = st.selectbox(
+                "Symbol",
+                ['SPY', 'QQQ', 'DIA', 'GLD', 'SLV', 'USO', 'UNG', '^VIX', 'XLK', 'XLV', 'XLE', 'XLF']
+            )
+        elif news_type == "Sector News":
+            news_sector = st.selectbox(
+                "Sector",
+                ["Technology", "Healthcare", "Finance", "Energy", "Retail"]
+            )
+        elif news_type == "Search":
+            search_query = st.text_input("Search Terms", placeholder="e.g., inflation, earnings, fed")
+        else:
+            news_symbol = None
+            news_sector = None
+            search_query = None
+    with col3:
+        news_limit = st.slider("Number of Articles", 5, 50, 15)
+    
+    # Fetch news button
+    if st.button("Fetch Latest News"):
+        with st.spinner("Fetching news..."):
+            try:
+                if news_type == "Market News":
+                    articles = news_fetcher.get_market_news(limit=news_limit)
+                elif news_type == "Symbol News" and news_symbol:
+                    articles = news_fetcher.get_symbol_news(news_symbol, limit=news_limit)
+                elif news_type == "Sector News" and news_sector:
+                    articles = news_fetcher.get_sector_news(news_sector, limit=news_limit)
+                elif news_type == "Search" and search_query:
+                    articles = news_fetcher.search_news(search_query, limit=news_limit)
+                else:
+                    articles = []
+                
+                if articles:
+                    st.success(f"Found {len(articles)} articles")
+                    
+                    # Display articles
+                    for i, article in enumerate(articles):
+                        with st.expander(f"{article['title'][:80]}..." if len(article['title']) > 80 else article['title']):
+                            col1, col2 = st.columns([3, 1])
+                            
+                            with col1:
+                                st.markdown(f"**Source:** {article['source']}")
+                                st.markdown(f"**Published:** {article['published'].strftime('%Y-%m-%d %H:%M')}")
+                                if article.get('author'):
+                                    st.markdown(f"**Author:** {article['author']}")
+                            
+                            with col2:
+                                if st.button("Read More", key=f"read_{i}"):
+                                    st.markdown(f"[Open Article]({article['link']})")
+                            
+                            st.markdown("**Summary:**")
+                            st.write(article['summary'])
+                            
+                            # Store article in database
+                            if db_initialized:
+                                db_manager.store_news_article(article)
+                else:
+                    st.info("No articles found for the selected criteria.")
+                    
+            except Exception as e:
+                st.error(f"Error fetching news: {str(e)}")
+    
+    # Trending topics
+    st.subheader("📈 Trending Topics")
+    if st.button("Get Trending Topics"):
+        with st.spinner("Analyzing trends..."):
+            try:
+                trending = news_fetcher.get_trending_topics()
+                if trending:
+                    cols = st.columns(5)
+                    for i, topic in enumerate(trending[:10]):
+                        with cols[i % 5]:
+                            st.metric(
+                                topic['topic'].title(),
+                                f"{topic['count']} mentions"
+                            )
+                else:
+                    st.info("No trending topics found.")
+            except Exception as e:
+                st.error(f"Error getting trending topics: {str(e)}")
+    
+    # Recent stored news
+    if db_initialized:
+        st.subheader("📚 Recent Stored Articles")
+        stored_articles = db_manager.get_stored_news(limit=10)
+        if stored_articles:
+            for article in stored_articles:
+                st.markdown(f"**{article['title']}**")
+                st.caption(f"{article['source']} • {article['published_date'].strftime('%Y-%m-%d %H:%M')}")
+                st.markdown(f"[Read Article]({article['url']})")
+                st.markdown("---")
+        else:
+            st.info("No stored articles found.")
+
+elif page == "Portfolio":
+    st.header("💼 Portfolio Management")
+    
+    # User ID input
+    user_id = st.sidebar.text_input("User ID", value="default_user")
+    
+    if not db_initialized:
+        st.error("Database not available for portfolio functionality.")
+        st.stop()
+    
+    # Get user portfolios
+    portfolios = db_manager.get_user_portfolios(user_id)
+    
+    # Portfolio selection or creation
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        if portfolios:
+            selected_portfolio = st.selectbox(
+                "Select Portfolio",
+                options=[p['id'] for p in portfolios],
+                format_func=lambda x: next(p['name'] for p in portfolios if p['id'] == x)
+            )
+        else:
+            selected_portfolio = None
+            st.info("No portfolios found. Create one below.")
+    
+    with col2:
+        if st.button("🔄 Refresh Portfolios"):
+            st.rerun()
+    
+    # Create new portfolio
+    with st.expander("➕ Create New Portfolio"):
+        with st.form("create_portfolio"):
+            portfolio_name = st.text_input("Portfolio Name")
+            portfolio_description = st.text_area("Description (optional)")
+            initial_cash = st.number_input("Initial Cash Balance", min_value=0.0, value=10000.0, step=100.0)
+            
+            if st.form_submit_button("Create Portfolio"):
+                if portfolio_name:
+                    portfolio_id = db_manager.create_portfolio(user_id, portfolio_name, portfolio_description, initial_cash)
+                    if portfolio_id:
+                        st.success(f"Portfolio '{portfolio_name}' created successfully!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to create portfolio")
+                else:
+                    st.error("Portfolio name is required")
+    
+    # Portfolio management
+    if selected_portfolio:
+        portfolio_info = next(p for p in portfolios if p['id'] == selected_portfolio)
+        
+        st.subheader(f"📊 {portfolio_info['name']}")
+        st.markdown(f"*{portfolio_info['description']}*")
+        
+        # Get current prices for portfolio calculation
+        holdings = db_manager.get_portfolio_holdings(selected_portfolio)
+        symbols = list(set([h['symbol'] for h in holdings]))
+        
+        current_prices = {}
+        if symbols:
+            for symbol in symbols:
+                data = data_fetcher._fetch_ticker_data(symbol)
+                if data:
+                    current_prices[symbol] = data['price']
+        
+        # Calculate portfolio value
+        portfolio_value = db_manager.calculate_portfolio_value(selected_portfolio, current_prices)
+        
+        # Portfolio summary
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Value", f"${portfolio_value['total_value']:,.2f}")
+        with col2:
+            st.metric("Total Cost", f"${portfolio_value['total_cost']:,.2f}")
+        with col3:
+            gain_loss_color = "normal" if portfolio_value['total_gain_loss'] >= 0 else "inverse"
+            st.metric(
+                "Gain/Loss", 
+                f"${portfolio_value['total_gain_loss']:,.2f}",
+                delta=f"{portfolio_value['total_gain_loss_pct']:.2f}%"
+            )
+        with col4:
+            st.metric("Cash Balance", f"${portfolio_info['cash_balance']:,.2f}")
+        
+        # Holdings table
+        st.subheader("📈 Current Holdings")
+        if portfolio_value['holdings']:
+            holdings_df = pd.DataFrame(portfolio_value['holdings'])
+            
+            # Format columns for display
+            holdings_df['avg_cost'] = holdings_df['avg_cost'].apply(lambda x: f"${x:.2f}")
+            holdings_df['current_price'] = holdings_df['current_price'].apply(lambda x: f"${x:.2f}")
+            holdings_df['market_value'] = holdings_df['market_value'].apply(lambda x: f"${x:,.2f}")
+            holdings_df['cost_basis'] = holdings_df['cost_basis'].apply(lambda x: f"${x:,.2f}")
+            holdings_df['gain_loss'] = holdings_df['gain_loss'].apply(lambda x: f"${x:,.2f}")
+            holdings_df['gain_loss_pct'] = holdings_df['gain_loss_pct'].apply(lambda x: f"{x:.2f}%")
+            
+            st.dataframe(
+                holdings_df[['symbol', 'quantity', 'avg_cost', 'current_price', 'market_value', 'gain_loss', 'gain_loss_pct']],
+                use_container_width=True
+            )
+        else:
+            st.info("No holdings in this portfolio.")
+        
+        # Add/Sell positions
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("📈 Buy Position")
+            with st.form("buy_position"):
+                buy_symbol = st.selectbox(
+                    "Symbol",
+                    ['SPY', 'QQQ', 'DIA', 'GLD', 'SLV', 'USO', 'UNG', '^VIX', 'XLK', 'XLV', 'XLE', 'XLF'] +
+                    [h['symbol'] for h in holdings if h['symbol'] not in ['SPY', 'QQQ', 'DIA', 'GLD', 'SLV', 'USO', 'UNG', '^VIX', 'XLK', 'XLV', 'XLE', 'XLF']]
+                )
+                buy_quantity = st.number_input("Quantity", min_value=0.1, value=1.0, step=0.1)
+                buy_price = st.number_input("Price per Share", min_value=0.01, value=100.0, step=0.01)
+                buy_notes = st.text_input("Notes (optional)")
+                
+                if st.form_submit_button("Buy"):
+                    success = db_manager.add_holding(selected_portfolio, buy_symbol, buy_quantity, buy_price, buy_notes)
+                    if success:
+                        st.success(f"Added {buy_quantity} shares of {buy_symbol}")
+                        st.rerun()
+                    else:
+                        st.error("Failed to add position")
+        
+        with col2:
+            st.subheader("📉 Sell Position")
+            current_symbols = [h['symbol'] for h in holdings if h['quantity'] > 0]
+            
+            if current_symbols:
+                with st.form("sell_position"):
+                    sell_symbol = st.selectbox("Symbol", current_symbols)
+                    
+                    # Get current holding quantity
+                    current_holding = next((h for h in holdings if h['symbol'] == sell_symbol), None)
+                    max_quantity = current_holding['quantity'] if current_holding else 0
+                    
+                    sell_quantity = st.number_input(
+                        f"Quantity (max: {max_quantity})", 
+                        min_value=0.1, 
+                        max_value=float(max_quantity), 
+                        value=min(1.0, float(max_quantity)), 
+                        step=0.1
+                    )
+                    sell_price = st.number_input("Price per Share", min_value=0.01, value=100.0, step=0.01)
+                    sell_notes = st.text_input("Notes (optional)")
+                    
+                    if st.form_submit_button("Sell"):
+                        success = db_manager.sell_holding(selected_portfolio, sell_symbol, sell_quantity, sell_price, sell_notes)
+                        if success:
+                            st.success(f"Sold {sell_quantity} shares of {sell_symbol}")
+                            st.rerun()
+                        else:
+                            st.error("Failed to sell position")
+            else:
+                st.info("No positions to sell")
+        
+        # Transaction history
+        st.subheader("📋 Transaction History")
+        transactions = db_manager.get_portfolio_transactions(selected_portfolio)
+        if transactions:
+            transactions_df = pd.DataFrame(transactions)
+            transactions_df['date'] = transactions_df['date'].dt.strftime('%Y-%m-%d %H:%M')
+            transactions_df['total_amount'] = transactions_df['total_amount'].apply(lambda x: f"${x:,.2f}")
+            transactions_df['price'] = transactions_df['price'].apply(lambda x: f"${x:.2f}")
+            
+            st.dataframe(
+                transactions_df[['date', 'symbol', 'type', 'quantity', 'price', 'total_amount', 'notes']],
+                use_container_width=True
+            )
+        else:
+            st.info("No transactions found.")
 
 elif page == "Database Stats":
     st.header("📊 Database Statistics")
