@@ -4,6 +4,7 @@ import numpy as np
 import streamlit as st
 from datetime import datetime, timedelta
 import logging
+from database import db_manager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -59,6 +60,11 @@ class DataFetcher:
             data = self._fetch_ticker_data(symbol)
             if data:
                 indices_data[symbol] = data
+                # Store in database
+                try:
+                    db_manager.store_financial_data(symbol, data, 'index')
+                except Exception as e:
+                    logger.warning(f"Failed to store data for {symbol}: {str(e)}")
         
         return indices_data
     
@@ -72,6 +78,11 @@ class DataFetcher:
             data = self._fetch_ticker_data(symbol)
             if data:
                 commodities_data[symbol] = data
+                # Store in database
+                try:
+                    db_manager.store_financial_data(symbol, data, 'commodity')
+                except Exception as e:
+                    logger.warning(f"Failed to store data for {symbol}: {str(e)}")
         
         return commodities_data
     
@@ -105,7 +116,14 @@ class DataFetcher:
         """
         Fetch VIX volatility index data
         """
-        return self._fetch_ticker_data('^VIX')
+        data = self._fetch_ticker_data('^VIX')
+        if data:
+            # Store in database
+            try:
+                db_manager.store_financial_data('^VIX', data, 'vix')
+            except Exception as e:
+                logger.warning(f"Failed to store VIX data: {str(e)}")
+        return data
     
     def get_sector_etfs(self, symbols):
         """
@@ -117,6 +135,11 @@ class DataFetcher:
             data = self._fetch_ticker_data(symbol)
             if data:
                 sector_data[symbol] = data
+                # Store in database
+                try:
+                    db_manager.store_financial_data(symbol, data, 'sector')
+                except Exception as e:
+                    logger.warning(f"Failed to store data for {symbol}: {str(e)}")
         
         return sector_data
     
