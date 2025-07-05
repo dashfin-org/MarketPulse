@@ -8,19 +8,26 @@ This is a Streamlit-based financial dashboard that provides real-time market dat
 
 The application follows a modular architecture built on Streamlit for the web framework:
 
-**Frontend**: Streamlit web application with interactive widgets and real-time data visualization
-- Single-page application with sidebar controls
-- Plotly charts for interactive financial data visualization
+**Frontend**: Multi-page Streamlit web application with interactive widgets and real-time data visualization
+- Navigation between Live Dashboard, Historical Data, Market Alerts, and Database Stats
+- Plotly charts for interactive financial data visualization with standard finance intervals
 - Auto-refresh capability for real-time updates
 
 **Backend**: Python-based data processing and fetching layer
 - Yahoo Finance API integration for market data
+- PostgreSQL database for historical data storage and market alerts
 - Caching layer for performance optimization
 - Error handling and logging for robustness
 
-**Data Source**: Yahoo Finance API via yfinance library
-- Real-time and historical market data
-- No local database storage (stateless architecture)
+**Database**: PostgreSQL database for persistent storage
+- Financial data storage with automatic data type conversion
+- Market alerts system with price triggers
+- User preferences and historical analysis
+- Database statistics and management tools
+
+**Data Sources**: 
+- Yahoo Finance API via yfinance library for real-time and historical market data
+- Database storage for accumulated historical data and alerts
 
 ## Key Components
 
