@@ -48,7 +48,7 @@ st.markdown("---")
 st.sidebar.header("Dashboard Controls")
 
 # Navigation
-page = st.sidebar.selectbox("Navigate", ["Live Dashboard", "Historical Data", "Market Alerts", "News", "Portfolio", "Database Stats"])
+page = st.sidebar.selectbox("Navigate", ["Live Dashboard", "Historical Data", "Fundamental Analysis", "Market Alerts", "News", "Portfolio", "Database Stats"])
 
 # Auto-refresh controls (only for live dashboard)
 if page == "Live Dashboard":
@@ -674,6 +674,10 @@ elif page == "News":
                 st.markdown("---")
         else:
             st.info("No stored articles found.")
+
+elif page == "Fundamental Analysis":
+    from pages.fundamental_analysis import render_fundamental_analysis_page
+    render_fundamental_analysis_page()
 
 elif page == "Portfolio":
     st.header("💼 Portfolio Management")
