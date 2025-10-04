@@ -20,10 +20,6 @@ author = "agent"
 task = "workflow.run"
 args = "Streamlit Finance Dashboard"
 
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "install_dependencies"
-
 [[workflows.workflow]]
 name = "Streamlit Finance Dashboard"
 author = "agent"
@@ -33,16 +29,12 @@ task = "shell.exec"
 args = "streamlit run app.py --server.port 5000"
 waitForPort = 5000
 
-[[workflows.workflow]]
-name = "install_dependencies"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "uv add yfinance plotly"
-
 [[ports]]
 localPort = 5000
+
+[[ports]]
+localPort = 42211
+externalPort = 80
 
 [agent]
 integrations = ["web_scraper:1.0.0", "python_openai:1.0.0"]

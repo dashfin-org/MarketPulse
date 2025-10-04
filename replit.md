@@ -9,14 +9,16 @@ This is a Streamlit-based financial dashboard that provides real-time market dat
 The application follows a modular architecture built on Streamlit for the web framework:
 
 **Frontend**: Multi-page Streamlit web application with interactive widgets and real-time data visualization
-- Navigation between Live Dashboard, Historical Data, Market Alerts, and Database Stats
+- Navigation between Live Dashboard, Historical Data, Fundamental Analysis, Market Alerts, News, Portfolio, and Database Stats
 - Plotly charts for interactive financial data visualization with standard finance intervals
 - Auto-refresh capability for real-time updates
+- AI-powered fundamental analysis with multiple valuation frameworks
 
 **Backend**: Python-based data processing and fetching layer
-- Yahoo Finance API integration for market data
-- PostgreSQL database for historical data storage and market alerts
-- Caching layer for performance optimization
+- Yahoo Finance API integration for market data and fundamental financial statements
+- OpenAI GPT-5 integration for AI-powered fundamental analysis
+- PostgreSQL database for historical data storage, market alerts, and analysis caching
+- Caching layer for performance optimization (5-min for market data, 1-hour for fundamentals)
 - Error handling and logging for robustness
 
 **Database**: PostgreSQL database for persistent storage
@@ -49,6 +51,18 @@ The application follows a modular architecture built on Streamlit for the web fr
 - Candlestick charts for price visualization
 - Customizable time periods and styling
 - Error handling for chart generation
+
+### 4. Fundamentals Fetcher (`utils/fundamentals.py`)
+- Fetch quarterly and annual financial statements using yfinance
+- Extract up to 5 years of earnings history
+- Calculate growth rates and profit margins
+- Support for income statements, balance sheets, and cash flow statements
+
+### 5. AI Valuation Analyzer (`utils/ai_valuation.py`)
+- OpenAI GPT-5 powered fundamental analysis
+- Multiple valuation frameworks: Comprehensive, Growth Investing, Value Investing, DCF
+- Detailed investment recommendations with confidence scores
+- Industry comparable analysis
 
 ## Data Flow
 
@@ -90,6 +104,7 @@ The application is designed for cloud deployment on platforms like:
 - July 05, 2025. Initial setup
 - July 05, 2025. Added PostgreSQL database integration with financial data storage, historical analysis, market alerts, and database statistics pages
 - July 05, 2025. Added news and portfolio tracking functionality with RSS feeds from major financial sources and comprehensive portfolio management system
+- October 04, 2025. Added Fundamental Analysis page with AI-powered valuation analysis using OpenAI GPT-5, supporting 5 years of earnings history with quarterly/annual data, multiple valuation frameworks (comprehensive, growth, value, DCF), visual trend analysis of key financial metrics, and database caching of AI analysis results
 
 ## User Preferences
 
