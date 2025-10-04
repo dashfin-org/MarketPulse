@@ -112,6 +112,17 @@ class NewsArticle(Base):
     sentiment = Column(String(20))  # 'positive', 'negative', 'neutral'
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class FundamentalAnalysis(Base):
+    """Store AI-powered fundamental analysis results"""
+    __tablename__ = "fundamental_analysis"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    symbol = Column(String(20), nullable=False, index=True)
+    analysis_type = Column(String(50), nullable=False)  # 'comprehensive', 'growth', 'value', 'dcf'
+    analysis_result = Column(Text, nullable=False)  # JSON string of AI analysis
+    period = Column(String(20), nullable=False)  # 'quarterly' or 'annual'
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 class DatabaseManager:
     """Manage database operations for the finance dashboard"""
     
@@ -726,6 +737,63 @@ class DatabaseManager:
             
         except Exception as e:
             logger.error(f"Error getting stored news: {str(e)}")
+            return []
+    
+    # Fundamental Analysis Methods
+    def store_fundamental_analysis(self, symbol: str, analysis_type: str, analysis_result: Dict, period: str) -> bool:
+        """Store fundamental analysis result"""
+        session = None
+        try:
+            session = self.get_session()
+            
+            import json
+            analysis = FundamentalAnalysis(
+                symbol=symbol,
+                analysis_type=analysis_type,
+                analysis_result=json.dumps(analysis_result),
+                period=period
+            )
+            
+            session.add(analysis)
+            session.commit()
+            session.close()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error storing fundamental analysis: {str(e)}")
+            if session:
+                session.rollback()
+                session.close()
+            return False
+    
+    def get_fundamental_analysis(self, symbol: str, analysis_type: str = None, limit: int = 5) -> List[Dict]:
+        """Get stored fundamental analysis results"""
+        try:
+            session = self.get_session()
+            
+            query = session.query(FundamentalAnalysis).filter(
+                FundamentalAnalysis.symbol == symbol
+            )
+            
+            if analysis_type:
+                query = query.filter(FundamentalAnalysis.analysis_type == analysis_type)
+            
+            analyses = query.order_by(FundamentalAnalysis.created_at.desc()).limit(limit).all()
+            
+            session.close()
+            
+            import json
+            return [{
+                'id': str(analysis.id),
+                'symbol': analysis.symbol,
+                'analysis_type': analysis.analysis_type,
+                'analysis_result': json.loads(analysis.analysis_result),
+                'period': analysis.period,
+                'created_at': analysis.created_at
+            } for analysis in analyses]
+            
+        except Exception as e:
+            logger.error(f"Error getting fundamental analysis: {str(e)}")
             return []
 
 # Initialize database manager
