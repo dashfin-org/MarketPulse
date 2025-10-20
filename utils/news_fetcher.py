@@ -1,13 +1,17 @@
 import requests
 import feedparser
-import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import streamlit as st
 from urllib.parse import quote_plus
 import time
 
-logger = logging.getLogger(__name__)
+from config import config
+from utils.exceptions import NewsError, ValidationError
+from utils.logging_config import get_logger, log_execution_time, log_api_call
+from utils.cache import cached, cache_key_for_news
+
+logger = get_logger(__name__)
 
 class NewsSource:
     """Individual news source configuration"""
