@@ -3,12 +3,15 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 from datetime import datetime, timedelta
-import logging
-from database import db_manager
+from typing import Dict, List, Optional, Union
+import time
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from config import config
+from database import db_manager, get_db_session
+from utils.exceptions import DataFetchError, ValidationError
+from utils.logging_config import get_logger, log_execution_time, log_api_call
+
+logger = get_logger(__name__)
 
 class DataFetcher:
     """
@@ -16,73 +19,139 @@ class DataFetcher:
     """
     
     def __init__(self):
-        self.cache_duration = 300  # 5 minutes cache
+        self.cache_duration = config.cache.market_data_ttl
+        self.timeout = config.api.yfinance_timeout
+        self.retry_attempts = config.api.yfinance_retry_attempts
+        
+    def _validate_symbol(self, symbol: str) -> str:
+        """Validate and normalize stock symbol."""
+        if not symbol or not isinstance(symbol, str):
+            raise ValidationError("Symbol must be a non-empty string")
+        
+        symbol = symbol.strip().upper()
+        
+        # Allow common financial symbol formats
+        # Remove allowed special characters for validation
+        clean_symbol = symbol.replace('.', '').replace('-', '').replace('^', '').replace('=', '')
+        
+        if not clean_symbol.isalnum():
+            raise ValidationError(f"Invalid symbol format: {symbol}")
+        
+        return symbol
     
-    @st.cache_data(ttl=300)
-    def _fetch_ticker_data(_self, symbol):
+    @st.cache_data(ttl=60)  # Use config value
+    @log_api_call("Yahoo Finance")
+    @log_execution_time()
+    def _fetch_ticker_data(_self, symbol: str) -> Optional[Dict]:
         """
-        Fetch ticker data with caching
+        Fetch ticker data with caching and retry logic
         """
-        try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.info
-            hist = ticker.history(period="2d")
-            
-            if hist.empty:
-                logger.warning(f"No historical data for {symbol}")
-                return None
-            
-            current_price = hist['Close'].iloc[-1]
-            prev_close = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
-            
-            change = current_price - prev_close
-            change_pct = (change / prev_close) * 100 if prev_close != 0 else 0
-            
-            return {
-                'symbol': symbol,
-                'price': current_price,
-                'change': change,
-                'change_pct': change_pct,
-                'volume': hist['Volume'].iloc[-1] if 'Volume' in hist.columns else 0,
-                'info': info
-            }
-        except Exception as e:
-            logger.error(f"Error fetching data for {symbol}: {str(e)}")
-            return None
+        symbol = _self._validate_symbol(symbol)
+        
+        for attempt in range(_self.retry_attempts):
+            try:
+                logger.debug("Fetching ticker data", symbol=symbol, attempt=attempt + 1)
+                
+                ticker = yf.Ticker(symbol)
+                info = ticker.info
+                hist = ticker.history(period="2d")
+                
+                if hist.empty:
+                    logger.warning("No historical data available", symbol=symbol)
+                    return None
+                
+                current_price = float(hist['Close'].iloc[-1])
+                prev_close = float(hist['Close'].iloc[-2]) if len(hist) > 1 else current_price
+                
+                change = current_price - prev_close
+                change_pct = (change / prev_close) * 100 if prev_close != 0 else 0
+                volume = float(hist['Volume'].iloc[-1]) if 'Volume' in hist.columns else 0
+                
+                return {
+                    'symbol': symbol,
+                    'price': current_price,
+                    'change': change,
+                    'change_pct': change_pct,
+                    'volume': volume,
+                    'info': info
+                }
+                
+            except Exception as e:
+                logger.warning(
+                    "Failed to fetch ticker data",
+                    symbol=symbol,
+                    attempt=attempt + 1,
+                    error=str(e)
+                )
+                if attempt < _self.retry_attempts - 1:
+                    time.sleep(1)  # Wait before retry
+                else:
+                    logger.error("All retry attempts failed", symbol=symbol)
+                    raise DataFetchError(f"Failed to fetch data for {symbol} after {_self.retry_attempts} attempts: {str(e)}")
+        
+        return None
     
-    def get_indices_data(self, symbols):
+    @log_execution_time()
+    def get_indices_data(self, symbols: List[str]) -> Dict[str, Dict]:
         """
-        Fetch data for stock indices
+        Fetch data for stock indices with error handling
         """
+        if not symbols:
+            raise ValidationError("Symbols list cannot be empty")
+        
         indices_data = {}
+        failed_symbols = []
         
         for symbol in symbols:
-            data = self._fetch_ticker_data(symbol)
-            if data:
-                indices_data[symbol] = data
-                # Store in database
-                try:
-                    db_manager.store_financial_data(symbol, data, 'index')
-                except Exception as e:
-                    logger.warning(f"Failed to store data for {symbol}: {str(e)}")
+            try:
+                data = self._fetch_ticker_data(symbol)
+                if data:
+                    indices_data[symbol] = data
+                    # Store in database
+                    try:
+                        db_manager.store_financial_data(symbol, data, 'index')
+                    except Exception as e:
+                        logger.warning("Failed to store index data", symbol=symbol, error=str(e))
+                else:
+                    failed_symbols.append(symbol)
+            except Exception as e:
+                logger.error("Failed to fetch index data", symbol=symbol, error=str(e))
+                failed_symbols.append(symbol)
+        
+        if failed_symbols:
+            logger.warning("Some symbols failed to fetch", failed_symbols=failed_symbols)
         
         return indices_data
     
-    def get_commodities_data(self, symbols):
+    @log_execution_time()
+    def get_commodities_data(self, symbols: List[str]) -> Dict[str, Dict]:
         """
-        Fetch data for commodities
+        Fetch data for commodities with error handling
         """
+        if not symbols:
+            raise ValidationError("Symbols list cannot be empty")
+        
         commodities_data = {}
+        failed_symbols = []
         
         for symbol in symbols:
-            data = self._fetch_ticker_data(symbol)
-            if data:
-                commodities_data[symbol] = data
-                # Store in database
-                try:
-                    db_manager.store_financial_data(symbol, data, 'commodity')
-                except Exception as e:
-                    logger.warning(f"Failed to store data for {symbol}: {str(e)}")
+            try:
+                data = self._fetch_ticker_data(symbol)
+                if data:
+                    commodities_data[symbol] = data
+                    # Store in database
+                    try:
+                        db_manager.store_financial_data(symbol, data, 'commodity')
+                    except Exception as e:
+                        logger.warning("Failed to store commodity data", symbol=symbol, error=str(e))
+                else:
+                    failed_symbols.append(symbol)
+            except Exception as e:
+                logger.error("Failed to fetch commodity data", symbol=symbol, error=str(e))
+                failed_symbols.append(symbol)
+        
+        if failed_symbols:
+            logger.warning("Some commodity symbols failed to fetch", failed_symbols=failed_symbols)
         
         return commodities_data
     

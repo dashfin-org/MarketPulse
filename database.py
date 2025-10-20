@@ -1,4 +1,3 @@
-import os
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
@@ -7,15 +6,35 @@ from sqlalchemy import create_engine, Column, String, Float, DateTime, Integer, 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.exc import SQLAlchemyError
 import uuid
+from contextlib import contextmanager
 
-logger = logging.getLogger(__name__)
+from config import config
+from utils.exceptions import DatabaseError, ConfigurationError
+from utils.logging_config import get_logger
 
-# Database setup
-DATABASE_URL = os.getenv('DATABASE_URL')
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+logger = get_logger(__name__)
+
+# Database setup with configuration
+if not config.database.url:
+    raise ConfigurationError("Database URL not configured")
+
+try:
+    engine = create_engine(
+        config.database.url,
+        pool_size=config.database.pool_size,
+        max_overflow=config.database.max_overflow,
+        pool_timeout=config.database.pool_timeout,
+        pool_recycle=config.database.pool_recycle,
+        echo=config.database.echo
+    )
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base = declarative_base()
+    logger.info("Database engine initialized successfully")
+except Exception as e:
+    logger.error("Failed to initialize database engine", error=str(e))
+    raise ConfigurationError(f"Database initialization failed: {str(e)}")
 
 class FinancialData(Base):
     """Store historical financial data"""
@@ -123,6 +142,21 @@ class FundamentalAnalysis(Base):
     period = Column(String(20), nullable=False)  # 'quarterly' or 'annual'
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+@contextmanager
+def get_db_session():
+    """Context manager for database sessions with automatic cleanup."""
+    session = SessionLocal()
+    try:
+        yield session
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.error("Database session error", error=str(e))
+        raise DatabaseError(f"Database operation failed: {str(e)}")
+    finally:
+        session.close()
+
+
 class DatabaseManager:
     """Manage database operations for the finance dashboard"""
     
@@ -135,43 +169,56 @@ class DatabaseManager:
         try:
             Base.metadata.create_all(bind=self.engine)
             logger.info("Database tables created successfully")
+            return True
+        except SQLAlchemyError as e:
+            logger.error("Error creating tables", error=str(e))
+            raise DatabaseError(f"Failed to create database tables: {str(e)}")
         except Exception as e:
-            logger.error(f"Error creating tables: {str(e)}")
+            logger.error("Unexpected error creating tables", error=str(e))
+            raise DatabaseError(f"Unexpected error creating tables: {str(e)}")
             
     def get_session(self) -> Session:
-        """Get database session"""
+        """Get database session (deprecated - use get_db_session context manager)"""
+        logger.warning("get_session() is deprecated. Use get_db_session() context manager instead.")
         return self.SessionLocal()
+    
+    def health_check(self) -> bool:
+        """Check database connectivity."""
+        try:
+            from sqlalchemy import text
+            with get_db_session() as session:
+                session.execute(text("SELECT 1"))
+                logger.info("Database health check passed")
+                return True
+        except Exception as e:
+            logger.error("Database health check failed", error=str(e))
+            return False
     
     def store_financial_data(self, symbol: str, data: Dict, data_type: str):
         """Store financial data in database"""
-        session = None
         try:
-            session = self.get_session()
-            
-            # Convert numpy types to Python native types
-            price = float(data['price']) if data['price'] is not None else 0.0
-            change = float(data['change']) if data['change'] is not None else 0.0
-            change_pct = float(data['change_pct']) if data['change_pct'] is not None else 0.0
-            volume = float(data.get('volume', 0))
-            
-            financial_record = FinancialData(
-                symbol=symbol,
-                price=price,
-                change=change,
-                change_pct=change_pct,
-                volume=volume,
-                data_type=data_type
-            )
-            
-            session.add(financial_record)
-            session.commit()
-            session.close()
-            
+            with get_db_session() as session:
+                # Convert numpy types to Python native types
+                price = float(data['price']) if data['price'] is not None else 0.0
+                change = float(data['change']) if data['change'] is not None else 0.0
+                change_pct = float(data['change_pct']) if data['change_pct'] is not None else 0.0
+                volume = float(data.get('volume', 0))
+                
+                financial_record = FinancialData(
+                    symbol=symbol,
+                    price=price,
+                    change=change,
+                    change_pct=change_pct,
+                    volume=volume,
+                    data_type=data_type
+                )
+                
+                session.add(financial_record)
+                logger.debug("Stored financial data", symbol=symbol, data_type=data_type)
+                
         except Exception as e:
-            logger.error(f"Error storing financial data for {symbol}: {str(e)}")
-            if session:
-                session.rollback()
-                session.close()
+            logger.error("Error storing financial data", symbol=symbol, error=str(e))
+            raise DatabaseError(f"Failed to store financial data for {symbol}: {str(e)}")
     
     def get_historical_data(self, symbol: str, hours: int = 24) -> List[Dict]:
         """Get historical data for a symbol from the last N hours"""

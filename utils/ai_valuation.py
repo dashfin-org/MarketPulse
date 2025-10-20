@@ -1,18 +1,19 @@
-import os
 import json
 import logging
 from typing import Dict, Optional, List
 import streamlit as st
-
-# Note: Using the blueprint:python_openai integration
-# the newest OpenAI model is "gpt-5" which was released August 7, 2025.
-# do not change this unless explicitly requested by the user
 from openai import OpenAI
+
+from config import config
 
 logger = logging.getLogger(__name__)
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+# Initialize OpenAI client with configuration
+openai_client = None
+if config.api.openai_api_key:
+    openai_client = OpenAI(api_key=config.api.openai_api_key)
+else:
+    logger.warning("OpenAI API key not configured. AI analysis features will be disabled.")
 
 class AIValuationAnalyzer:
     """
@@ -21,7 +22,9 @@ class AIValuationAnalyzer:
     
     def __init__(self):
         self.client = openai_client
-        self.model = "gpt-5"
+        self.model = config.api.openai_model
+        self.max_tokens = config.api.openai_max_tokens
+        self.temperature = config.api.openai_temperature
     
     def analyze_fundamentals(self, metrics: Dict, valuation_model: str = "comprehensive") -> Optional[Dict]:
         """
