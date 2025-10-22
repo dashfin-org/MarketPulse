@@ -6,7 +6,7 @@ Provides specific exception types for different error scenarios.
 
 class MarketPulseException(Exception):
     """Base exception for MarketPulse application."""
-    
+
     def __init__(self, message: str, error_code: str = None, details: dict = None):
         super().__init__(message)
         self.message = message

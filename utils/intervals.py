@@ -1,11 +1,12 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, Optional
+
 
 class FinanceIntervals:
     """
     Finance industry standard intervals for historical data
     """
-    
+
     INTERVALS = {
         '1m': {'period': '1d', 'interval': '1m', 'name': '1 Minute', 'hours': 0.017},
         '5m': {'period': '5d', 'interval': '5m', 'name': '5 Minutes', 'hours': 0.083},
@@ -28,17 +29,17 @@ class FinanceIntervals:
         '20yr': {'period': '20y', 'interval': '3mo', 'name': '20 Years', 'hours': 175200},
         '50yr': {'period': 'max', 'interval': '3mo', 'name': '50 Years', 'hours': 438000}
     }
-    
+
     @classmethod
     def get_interval_config(cls, interval_key: str) -> Optional[Dict]:
         """Get configuration for a specific interval"""
         return cls.INTERVALS.get(interval_key)
-    
+
     @classmethod
     def get_available_intervals(cls) -> Dict[str, str]:
         """Get all available intervals with their display names"""
         return {key: config['name'] for key, config in cls.INTERVALS.items()}
-    
+
     @classmethod
     def calculate_hours_from_now(cls, interval_key: str) -> Optional[float]:
         """Calculate hours from now for database queries"""
@@ -46,28 +47,28 @@ class FinanceIntervals:
         if not config or config['hours'] is None:
             return None
         return config['hours']
-    
+
     @classmethod
     def get_yfinance_params(cls, interval_key: str) -> Optional[Dict[str, str]]:
         """Get period and interval parameters for yfinance"""
         config = cls.get_interval_config(interval_key)
         if not config:
             return None
-        
+
         return {
             'period': config['period'],
             'interval': config['interval']
         }
-    
+
     @classmethod
     def get_chart_title(cls, symbol: str, interval_key: str) -> str:
         """Generate appropriate chart title"""
         config = cls.get_interval_config(interval_key)
         if not config:
             return f"{symbol} Price Chart"
-        
+
         return f"{symbol} - {config['name']} Chart"
-    
+
     @classmethod
     def is_intraday(cls, interval_key: str) -> bool:
         """Check if interval is intraday (< 1 day)"""
@@ -75,14 +76,14 @@ class FinanceIntervals:
         if not config or config['hours'] is None:
             return False
         return config['hours'] < 24
-    
+
     @classmethod
     def get_db_lookback_hours(cls, interval_key: str) -> int:
         """Get appropriate lookback hours for database queries"""
         config = cls.get_interval_config(interval_key)
         if not config:
             return 24
-        
+
         # For database queries, we need more data points for longer intervals
         if config['hours'] is None:  # YTD case
             # Calculate YTD hours
@@ -90,7 +91,7 @@ class FinanceIntervals:
             year_start = datetime(now.year, 1, 1)
             ytd_hours = (now - year_start).total_seconds() / 3600
             return int(ytd_hours)
-        
+
         # Return appropriate multiplier based on interval
         if config['hours'] < 1:  # Minutes
             return max(24, int(config['hours'] * 100))  # Show last day minimum
