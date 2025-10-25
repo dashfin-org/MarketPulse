@@ -42,7 +42,7 @@ class DatabaseConfig:
 class APIConfig:
     """External API configuration."""
     openai_api_key: Optional[str] = None
-    openai_model: str = "gpt-4"
+    openai_model: str = "gpt-4-turbo"
     openai_max_tokens: int = 2000
     openai_temperature: float = 0.1
 
